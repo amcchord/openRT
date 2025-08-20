@@ -14,6 +14,15 @@ $agent_id = $_POST['agent_id'];
 $output = [];
 $return_var = 0;
 
+// This prevents command injection and directory traversal attacks.
+if (!preg_match('/^[a-zA-Z0-9_-]+$/', $agent_id)) {
+    http_response_code(400);
+    echo json_encode([
+        'success' => false,
+        'error' => 'Invalid agent_id format'
+    ]);
+}
+
 // First run cleanup for this specific agent to ensure no stale mounts
 exec("sudo /usr/local/openRT/openRTApp/rtFileMount.pl -cleanup='$agent_id' 2>&1", $output, $return_var);
 if ($return_var !== 0) {
