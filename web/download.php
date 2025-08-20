@@ -7,6 +7,11 @@ if (!$agent_id || !$path) {
     die("Missing required parameters");
 }
 
+// This prevents directory traversal attacks.
+if (!preg_match('/^[a-zA-Z0-9_-]+$/', $agent_id)) {
+    die("Invalid agent id");
+}
+
 // Construct full path
 $base_path = "/rtMount/$agent_id";
 $full_path = "$base_path/$path";

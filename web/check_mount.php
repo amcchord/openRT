@@ -11,16 +11,29 @@ if (!isset($_GET['agent_id'])) {
 }
 
 $agent_id = $_GET['agent_id'];
+
+// This prevents command injection and directory traversal attacks.
+if (!preg_match('/^[a-zA-Z0-9_-]+$/', $agent_id)) {
+    http_response_code(400);
+    echo json_encode([
+        'success' => false,
+        'error' => 'Invalid agent_id format'
+    ]);
+}
+
+$agent_path = "/agents/$agent_id/";
 $mount_path = "/rtMount/$agent_id";
+$escaped_agent_path = escapeshellarg($agent_path);
+$escaped_mount_path = escapeshellarg($mount_path);
 
 // Check if the directory exists and has mounted volumes
 $output = [];
 $return_var = 0;
-exec("mount | grep '$mount_path' 2>&1", $output, $return_var);
+exec("mount | grep $escaped_mount_path 2>&1", $output, $return_var);
 
 // Also check for ZFS clones
 $clone_output = [];
-exec("zfs list -H -o name | grep 'mount_' | grep '/agents/$agent_id/' 2>&1", $clone_output, $return_var);
+exec("zfs list -H -o name | grep 'mount_' | grep $escaped_agent_path 2>&1", $clone_output, $return_var);
 // Filter clone output to only include mounted clones
 $mounted_clones = [];
 foreach ($clone_output as $clone) {
