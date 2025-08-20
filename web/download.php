@@ -7,9 +7,14 @@ if (!$agent_id || !$path) {
     die("Missing required parameters");
 }
 
+// This prevents command injection and directory traversal attacks.
+if (!preg_match('/^[a-zA-Z0-9_-]+$/', $agent_id)) {
+    die("Invalid agent id format");
+}
+
 // Construct full path
 $base_path = "/rtMount/$agent_id";
-$full_path = "$base_path/$path";
+$full_path = realpath($base_path . '/' . $path);
 
 // Security checks
 if (!str_starts_with(realpath($full_path), realpath($base_path))) {
@@ -38,4 +43,4 @@ while (!feof($handle)) {
     echo fread($handle, 8192);
     flush();
 }
-fclose($handle); 
+fclose($handle);
