@@ -1,30 +1,54 @@
 <?php
+/**
+ * Import/Export ZFS pools using openRTTUI.pl
+ */
+
 header('Content-Type: application/json');
 
-$action = isset($_GET['action']) ? $_GET['action'] : 'import';
-$output = [];
-$return_var = 0;
-
-if ($action === 'import') {
-    exec('sudo /usr/local/openRT/openRTApp/rtImport.pl import -j 2>&1', $output, $return_var);
-} elseif ($action === 'export') {
-    exec('sudo /usr/local/openRT/openRTApp/rtImport.pl export -j 2>&1', $output, $return_var);
-} else {
-    http_response_code(400);
-    echo json_encode([
-        'success' => false,
-        'error' => 'Invalid action specified'
-    ]);
+if (!isset($_GET['action'])) {
+    echo json_encode(['success' => false, 'error' => 'No action specified']);
     exit;
 }
 
-$response = [
-    'success' => $return_var === 0,
-    'output' => implode("\n", $output)
-];
+$action = $_GET['action'];
 
-if ($return_var !== 0) {
-    $response['error'] = ($action === 'import' ? 'Import' : 'Export') . ' failed with code ' . $return_var;
+switch ($action) {
+    case 'import':
+        // Import pools using openRTTUI.pl
+        $path = isset($_GET['path']) ? $_GET['path'] : '';
+        
+        if ($path) {
+            $cmd = "sudo /usr/local/openRT/openRTApp/openRTTUI.pl --non-interactive import " . escapeshellarg($path);
+        } else {
+            $cmd = "sudo /usr/local/openRT/openRTApp/openRTTUI.pl --non-interactive import";
+        }
+        
+        $output = [];
+        $return_var = 0;
+        exec($cmd . " 2>&1", $output, $return_var);
+        
+        echo json_encode([
+            'success' => $return_var === 0,
+            'output' => implode("\n", $output),
+            'message' => $return_var === 0 ? 'Pool imported successfully' : 'Import failed'
+        ]);
+        break;
+        
+    case 'export':
+        // Export pools - this would typically be cleanup in openRTTUI.pl terms
+        $cmd = "sudo /usr/local/openRT/openRTApp/openRTTUI.pl --non-interactive cleanup";
+        
+        $output = [];
+        $return_var = 0;
+        exec($cmd . " 2>&1", $output, $return_var);
+        
+        echo json_encode([
+            'success' => $return_var === 0,
+            'output' => implode("\n", $output),
+            'message' => $return_var === 0 ? 'Pool exported and cleaned up successfully' : 'Export failed'
+        ]);
+        break;
+        
+    default:
+        echo json_encode(['success' => false, 'error' => 'Invalid action']);
 }
-
-echo json_encode($response); 

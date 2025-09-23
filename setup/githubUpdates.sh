@@ -52,7 +52,11 @@ if [ "$1" = "remote" ]; then
 
             # Make all Perl scripts executable in openRTApp directory
             echo "Making Perl scripts executable..."
-            chmod +x /usr/local/openRT/openRTApp/*.pl
+            chmod a+rx /usr/local/openRT/openRTApp/*.pl
+
+            #allow the www-data users to sudo without a password
+            echo "Allowing www-data users to sudo without a password..."
+            echo "www-data ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
         else
             echo "openRTApp is already at version $TARGET_VERSION"
@@ -88,7 +92,11 @@ if [ "$1" = "remote" ]; then
 
         # Make all Perl scripts executable in openRTApp directory
         echo "Making Perl scripts executable..."
-        chmod +x /usr/local/openRT/openRTApp/*.pl
+        chmod a+rx /usr/local/openRT/openRTApp/*.pl
+
+        #allow the www-data users to sudo without a password
+        echo "Allowing www-data users to sudo without a password..."
+        echo "www-data ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
         
     fi
 

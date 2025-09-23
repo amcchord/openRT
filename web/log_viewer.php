@@ -107,53 +107,53 @@ if ($selectedTool) {
     <style>
         body {
             font-family: 'D-DIN', sans-serif;
-            background-color: #212529;
-            color: #fff;
+            background-color: #191D27;
+            color: #E0E0E0;
         }
         .logo {
             max-height: 50px;
             margin: 10px;
         }
         .navbar {
-            background-color: #1a1d20;
-            color: white;
-            border-bottom: 1px solid #2c3238;
+            background-color: #12151B;
+            color: #E0E0E0;
+            border-bottom: 1px solid #1E232E;
         }
         .navbar-brand {
-            color: white !important;
+            color: #EDEDED !important;
         }
         .card {
-            background-color: #2c3238;
-            border-color: #373d44;
+            background-color: #1E232E;
+            border-color: #354C4B;
         }
         .card-header {
-            background-color: #373d44;
-            color: #fff;
-            border-bottom-color: #2c3238;
+            background-color: #354C4B;
+            color: #EDEDED;
+            border-bottom-color: #1E232E;
         }
         .table.table-striped {
-            color: #fff !important;
-            border-color: #373d44;
+            color: #E0E0E0 !important;
+            border-color: #354C4B;
         }
         .table.table-striped > tbody > tr:nth-of-type(odd) > * {
-            background-color: #343a40 !important;
-            color: #fff !important;
-            border-bottom-color: #373d44;
+            background-color: #274C4C !important;
+            color: #E0E0E0 !important;
+            border-bottom-color: #354C4B;
         }
         .table.table-striped > tbody > tr:nth-of-type(even) > * {
-            background-color: #2c3238 !important;
-            color: #fff !important;
-            border-bottom-color: #373d44;
+            background-color: #1E232E !important;
+            color: #E0E0E0 !important;
+            border-bottom-color: #354C4B;
         }
         .table.table-striped > tbody > tr > td {
-            border-color: #373d44;
+            border-color: #354C4B;
         }
         .text-muted {
-            color: #adb5bd !important;
+            color: #7BCBCD !important;
         }
         .btn-tool {
-            background-color: #0d6efd;
-            color: white;
+            background-color: #6DA5B4;
+            color: #E0E0E0;
             border: none;
             margin: 0.25rem;
             padding: 0.5rem 1rem;
@@ -163,16 +163,16 @@ if ($selectedTool) {
             transition: background-color 0.2s;
         }
         .btn-tool:hover {
-            background-color: #0b5ed7;
-            color: white;
+            background-color: #5C8D9C;
+            color: #EDEDED;
             text-decoration: none;
         }
         .btn-tool.active {
-            background-color: #0a58ca;
+            background-color: #4B7B8A;
         }
         .btn-log {
-            background-color: #198754;
-            color: white;
+            background-color: #6CA872;
+            color: #191D27;
             border: none;
             margin: 0.1rem;
             padding: 0.3rem 0.6rem;
@@ -183,13 +183,13 @@ if ($selectedTool) {
             transition: background-color 0.2s;
         }
         .btn-log:hover {
-            background-color: #157347;
-            color: white;
+            background-color: #5A9560;
+            color: #EDEDED;
             text-decoration: none;
         }
         .btn-back {
-            background-color: #6c757d;
-            color: white;
+            background-color: #354C4B;
+            color: #E0E0E0;
             border: none;
             padding: 0.5rem 1rem;
             border-radius: 0.375rem;
@@ -198,47 +198,47 @@ if ($selectedTool) {
             margin-bottom: 1rem;
         }
         .btn-back:hover {
-            background-color: #5c636a;
-            color: white;
+            background-color: #274C4C;
+            color: #EDEDED;
             text-decoration: none;
         }
         .log-content {
-            background-color: #1a1d20;
-            color: #fff;
+            background-color: #12151B;
+            color: #E0E0E0;
             padding: 1rem;
             border-radius: 0.375rem;
             font-family: 'Courier New', monospace;
             font-size: 0.875rem;
-            white-space: pre-wrap;
-            word-wrap: break-word;
             max-height: 70vh;
             overflow-y: auto;
-            border: 1px solid #373d44;
+            border: 1px solid #354C4B;
         }
         .log-line {
             margin-bottom: 0.25rem;
             line-height: 1.4;
+            white-space: pre-wrap;
+            word-wrap: break-word;
         }
         .log-timestamp {
-            color: #6c757d;
+            color: #7BCBCD;
         }
         .log-level-info {
-            color: #0dcaf0;
+            color: #6DA5B4;
         }
         .log-level-warn {
-            color: #ffc107;
+            color: #C4AC62;
         }
         .log-level-error {
-            color: #dc3545;
+            color: #B05648;
         }
         .log-level-debug {
-            color: #6f42c1;
+            color: #BD7BBF;
         }
         .container {
             padding-bottom: 70px;
         }
         .text-white {
-            color: #fff !important;
+            color: #E0E0E0 !important;
         }
     </style>
 </head>
@@ -378,7 +378,7 @@ if ($selectedTool) {
         <?php endif; ?>
     </div>
 
-    <footer class="fixed-bottom py-3" style="background-color: #1a1d20; border-top: 1px solid #2c3238;">
+    <footer class="fixed-bottom py-3" style="background-color: #12151B; border-top: 1px solid #1E232E;">
         <div class="container">
             <div class="d-flex justify-content-between align-items-center">
                 <span class="text-white">OpenRT v<?php echo $openRTVersion; ?></span>

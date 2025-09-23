@@ -1,17 +1,15 @@
 <?php
+/**
+ * Get automount status
+ */
+
 header('Content-Type: application/json');
 
-$status_file = '/usr/local/openRT/status/automount';
-
-// Check if the file exists and read its content
-if (file_exists($status_file)) {
-    $enabled = trim(file_get_contents($status_file)) === '1';
-} else {
-    // Default to disabled if file doesn't exist
-    $enabled = false;
-}
+// Check if automount service/flag is enabled
+$automount_file = '/usr/local/openRT/status/automount_enabled';
+$enabled = file_exists($automount_file) && trim(file_get_contents($automount_file)) === '1';
 
 echo json_encode([
-    'success' => true,
-    'enabled' => $enabled
-]); 
+    'enabled' => $enabled,
+    'timestamp' => time()
+]);

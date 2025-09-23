@@ -1,30 +1,31 @@
 <?php
+/**
+ * Unmount all agents using openRTTUI.pl cleanup
+ */
+
 header('Content-Type: application/json');
+
+// Use openRTTUI.pl cleanup command
+$cmd = "sudo /usr/local/openRT/openRTApp/openRTTUI.pl --non-interactive cleanup 2>&1";
 
 $output = [];
 $return_var = 0;
+exec($cmd, $output, $return_var);
 
-// Execute cleanup command with '1' to indicate cleanup all
-exec("sudo /usr/local/openRT/openRTApp/rtFileMount.pl cleanup -j 2>&1", $output, $return_var);
-exec("sudo /usr/local/openRT/openRTApp/rtFileMount.pl -cleanup=1 -j 2>&1", $output, $return_var);
+$success = $return_var === 0;
 
-// Get the JSON output
-$json_output = implode("\n", $output);
-$result = json_decode($json_output, true);
-
-// If we got valid JSON, use it for the response
-if (json_last_error() === JSON_ERROR_NONE && $result) {
-    echo json_encode($result);
-} else {
-    // Otherwise, construct our own response
-    $response = [
-        'success' => $return_var === 0,
-        'output' => $json_output
-    ];
-
-    if ($return_var !== 0) {
-        $response['error'] = 'Unmount failed with code ' . $return_var;
+// Parse output to find what was cleaned
+$cleaned = [];
+foreach ($output as $line) {
+    if (preg_match('/(unmounted|removed|cleaned).*?:\s*(.+)/i', $line, $matches)) {
+        $cleaned[] = trim($matches[2]);
     }
+}
 
-    echo json_encode($response);
-} 
+echo json_encode([
+    'success' => $success,
+    'status' => $success ? 'success' : 'error',
+    'cleaned' => $cleaned,
+    'output' => implode("\n", $output),
+    'message' => $success ? 'All mounts cleaned up successfully' : 'Failed to clean up mounts'
+]);

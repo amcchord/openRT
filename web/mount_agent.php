@@ -1,54 +1,41 @@
 <?php
+/**
+ * Mount agent snapshots using openRTTUI.pl
+ */
+
 header('Content-Type: application/json');
 
-if (!isset($_POST['agent_id'])) {
+if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !isset($_POST['agent_id'])) {
     http_response_code(400);
-    echo json_encode([
-        'success' => false,
-        'error' => 'Missing agent_id parameter'
-    ]);
+    echo json_encode(['success' => false, 'error' => 'Invalid request']);
     exit;
 }
 
 $agent_id = $_POST['agent_id'];
+
+// Use openRTTUI.pl to mount the agent
+$cmd = "sudo /usr/local/openRT/openRTApp/openRTTUI.pl --non-interactive mount " . escapeshellarg($agent_id) . " 2>&1";
+
 $output = [];
 $return_var = 0;
+exec($cmd, $output, $return_var);
 
-// First run cleanup for this specific agent to ensure no stale mounts
-exec("sudo /usr/local/openRT/openRTApp/rtFileMount.pl -cleanup='$agent_id' 2>&1", $output, $return_var);
-if ($return_var !== 0) {
-    http_response_code(500);
-    echo json_encode([
-        'success' => false,
-        'error' => 'Failed to cleanup existing mounts for agent',
-        'output' => implode("\n", $output)
-    ]);
-    exit;
+$success = $return_var === 0;
+
+// Parse output to find mount points
+$mounts = [];
+if ($success) {
+    foreach ($output as $line) {
+        if (preg_match('/mounted at:\s*(.+)/i', $line, $matches)) {
+            $mounts[] = trim($matches[1]);
+        }
+    }
 }
 
-// Clear output array for the mount command
-$output = [];
-
-// Execute mount command for all snapshots of the agent
-exec("sudo /usr/local/openRT/openRTApp/rtFileMount.pl -j '$agent_id' all 2>&1", $output, $return_var);
-
-// Get the JSON output
-$json_output = implode("\n", $output);
-$result = json_decode($json_output, true);
-
-// If we got valid JSON, use it for the response
-if (json_last_error() === JSON_ERROR_NONE && $result) {
-    echo json_encode($result);
-} else {
-    // Otherwise, construct our own response
-    $response = [
-        'success' => $return_var === 0,
-        'output' => $json_output
-    ];
-
-    if ($return_var !== 0) {
-        $response['error'] = 'Mount failed with code ' . $return_var;
-    }
-
-    echo json_encode($response);
-} 
+echo json_encode([
+    'success' => $success,
+    'status' => $success ? 'success' : 'error',
+    'mounts' => $mounts,
+    'output' => implode("\n", $output),
+    'message' => $success ? 'Agent mounted successfully' : 'Failed to mount agent'
+]);

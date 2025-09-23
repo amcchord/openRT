@@ -9,7 +9,7 @@ AUTOMOUNT_FLAG="$STATUS_DIR/automount"
 # Create status directory if it doesn't exist
 mkdir -p "$STATUS_DIR"
 
-# Function to check if automount is enabled
+# Function to check if automount is enabled (always returns false)
 check_automount_enabled() {
     [[ -f "$AUTOMOUNT_FLAG" ]] && [[ "$(cat "$AUTOMOUNT_FLAG")" == "1" ]]
 }
@@ -37,7 +37,8 @@ handle_status_change() {
     # If automount is enabled and pool becomes Available
     if check_automount_enabled && [[ "$new_status" == "Available" ]]; then
         # Launch automount in the background
-        perl "$SCRIPT_DIR/rtAutoMount.pl" &
+        # Automount Disabled
+        #perl "$SCRIPT_DIR/rtAutoMount.pl" &
     fi
 }
 

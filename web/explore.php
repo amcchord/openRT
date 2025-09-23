@@ -1,568 +1,865 @@
+<?php
+/**
+ * OpenRT File Explorer - Browse mounted snapshot directories
+ */
+
+// Get current path from URL parameter, default to /rtMount
+$current_path = $_GET['path'] ?? '/rtMount';
+$current_path = realpath($current_path) ?: '/rtMount';
+
+// Security: Only allow browsing within /rtMount
+if (!str_starts_with($current_path, '/rtMount')) {
+    $current_path = '/rtMount';
+}
+
+// Handle AJAX requests for directory contents
+if (isset($_GET['action']) && $_GET['action'] === 'get_contents') {
+    header('Content-Type: application/json');
+    
+    if (!is_dir($current_path)) {
+        echo json_encode(['error' => 'Directory not found']);
+        exit;
+    }
+    
+    $items = [];
+    $entries = scandir($current_path);
+    
+    foreach ($entries as $entry) {
+        if ($entry === '.') continue;
+        
+        $full_path = $current_path . '/' . $entry;
+        $is_dir = is_dir($full_path);
+        $file_size = $is_dir ? 0 : filesize($full_path);
+        $size_display = $is_dir ? '-' : formatBytes($file_size);
+        $modified_timestamp = filemtime($full_path);
+        $modified = date('Y-m-d H:i:s', $modified_timestamp);
+        
+        $items[] = [
+            'name' => $entry,
+            'path' => $full_path,
+            'is_dir' => $is_dir,
+            'size' => $size_display,
+            'size_bytes' => $file_size,
+            'modified' => $modified,
+            'modified_timestamp' => $modified_timestamp,
+            'icon' => $is_dir ? 'fas fa-folder' : getFileIcon($entry)
+        ];
+    }
+    
+    // Default sort: directories first, then by name
+    $sort_by = $_GET['sort'] ?? 'name';
+    $sort_order = $_GET['order'] ?? 'asc';
+    
+    usort($items, function($a, $b) use ($sort_by, $sort_order) {
+        // Always keep directories first unless sorting by type
+        if ($sort_by !== 'type' && $a['is_dir'] !== $b['is_dir']) {
+            return $b['is_dir'] - $a['is_dir'];
+        }
+        
+        $result = 0;
+        switch ($sort_by) {
+            case 'size':
+                $result = $a['size_bytes'] <=> $b['size_bytes'];
+                break;
+            case 'modified':
+                $result = $a['modified_timestamp'] <=> $b['modified_timestamp'];
+                break;
+            case 'type':
+                // Sort by directory status first, then by name
+                if ($a['is_dir'] !== $b['is_dir']) {
+                    $result = $b['is_dir'] - $a['is_dir'];
+                } else {
+                    $result = strcasecmp($a['name'], $b['name']);
+                }
+                break;
+            case 'name':
+            default:
+                $result = strcasecmp($a['name'], $b['name']);
+                break;
+        }
+        
+        return $sort_order === 'desc' ? -$result : $result;
+    });
+    
+    echo json_encode([
+        'current_path' => $current_path,
+        'parent_path' => dirname($current_path),
+        'items' => $items,
+        'sort_by' => $sort_by,
+        'sort_order' => $sort_order
+    ]);
+    exit;
+}
+
+// Handle folder download as ZIP - streaming version
+if (isset($_GET['action']) && $_GET['action'] === 'download_folder') {
+    $folder_path = $_GET['path'] ?? '';
+    
+    // Security checks
+    $real_path = realpath($folder_path);
+    if (!$real_path || !str_starts_with($real_path, '/rtMount')) {
+        http_response_code(403);
+        die("Access denied");
+    }
+    
+    if (!is_dir($real_path)) {
+        http_response_code(404);
+        die("Folder not found");
+    }
+    
+    $folder_name = basename($real_path);
+    $zip_filename = $folder_name . '.zip';
+    
+    // Set headers for streaming ZIP
+    header('Content-Type: application/zip');
+    header('Content-Disposition: attachment; filename="' . addslashes($zip_filename) . '"');
+    header('Cache-Control: no-cache, must-revalidate');
+    header('Expires: 0');
+    header('Transfer-Encoding: chunked');
+    
+    // Disable output buffering to enable streaming
+    if (ob_get_level()) {
+        ob_end_clean();
+    }
+    
+    // Use system zip command to stream directly to output
+    $parent_dir = dirname($real_path);
+    $folder_name = basename($real_path);
+    
+    // Build the zip command that outputs to stdout
+    $cmd = sprintf(
+        'cd %s && zip -r - %s 2>/dev/null',
+        escapeshellarg($parent_dir),
+        escapeshellarg($folder_name)
+    );
+    
+    // Execute and stream directly to browser
+    $handle = popen($cmd, 'r');
+    if (!$handle) {
+        http_response_code(500);
+        die("Failed to create ZIP stream");
+    }
+    
+    // Stream the ZIP data in chunks
+    while (!feof($handle)) {
+        $chunk = fread($handle, 8192);
+        if ($chunk !== false && $chunk !== '') {
+            echo $chunk;
+            if (ob_get_level()) {
+                ob_flush();
+            }
+            flush();
+        }
+    }
+    
+    $exit_code = pclose($handle);
+    if ($exit_code !== 0) {
+        // If zip command failed, we can't really recover at this point
+        // since headers are already sent, but log the error
+        error_log("ZIP command failed with exit code: $exit_code");
+    }
+    exit;
+}
+
+// Get mounted snapshots from openRTTUI.pl
+function getMountedSnapshots() {
+    $cmd = "sudo /usr/local/openRT/openRTApp/openRTTUI.pl --non-interactive list-mounts 2>/dev/null";
+    $output = shell_exec($cmd);
+    
+    $mounts = [];
+    if ($output) {
+        $data = json_decode($output, true);
+        if ($data && isset($data['mounts'])) {
+            $mounts = $data['mounts'];
+        }
+    }
+    
+    // Also get mount info from system mount command
+    $mount_output = shell_exec("mount | grep rtMount");
+    $mount_lines = $mount_output ? explode("\n", trim($mount_output)) : [];
+    
+    $system_mounts = [];
+    foreach ($mount_lines as $line) {
+        if (preg_match('/on (\/rtMount\/[^\s]+)/', $line, $matches)) {
+            $mount_path = $matches[1];
+            if (is_dir($mount_path)) {
+                $path_parts = explode('/', $mount_path);
+                $agent_id = $path_parts[2] ?? 'unknown';
+                $snapshot_date = $path_parts[3] ?? 'unknown';
+                
+                $system_mounts[] = [
+                    'agent_id' => $agent_id,
+                    'agent_name' => $agent_id,
+                    'snapshot_date' => $snapshot_date,
+                    'mount_path' => $mount_path,
+                    'final_mount' => $mount_path
+                ];
+            }
+        }
+    }
+    
+    return array_merge($mounts, $system_mounts);
+}
+
+function formatBytes($size) {
+    if ($size == 0) return '0 B';
+    $units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    $i = floor(log($size) / log(1024));
+    return round($size / pow(1024, $i), 2) . ' ' . $units[$i];
+}
+
+function getFileIcon($filename) {
+    $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+    $icon_map = [
+        'pdf' => 'fas fa-file-pdf',
+        'doc' => 'fas fa-file-word', 'docx' => 'fas fa-file-word',
+        'xls' => 'fas fa-file-excel', 'xlsx' => 'fas fa-file-excel',
+        'ppt' => 'fas fa-file-powerpoint', 'pptx' => 'fas fa-file-powerpoint',
+        'jpg' => 'fas fa-file-image', 'jpeg' => 'fas fa-file-image', 'png' => 'fas fa-file-image', 'gif' => 'fas fa-file-image',
+        'mp3' => 'fas fa-file-audio', 'wav' => 'fas fa-file-audio',
+        'mp4' => 'fas fa-file-video', 'avi' => 'fas fa-file-video',
+        'zip' => 'fas fa-file-archive', 'rar' => 'fas fa-file-archive', '7z' => 'fas fa-file-archive',
+        'txt' => 'fas fa-file-alt', 'log' => 'fas fa-file-alt',
+        'exe' => 'fas fa-cog', 'msi' => 'fas fa-cog'
+    ];
+    
+    return $icon_map[$ext] ?? 'fas fa-file';
+}
+
+function formatMountTitle($mount) {
+    $mount_path = $mount['final_mount'] ?? $mount['mount_path'];
+    $agent_name = $mount['agent_name'] ?? $mount['agent_id'];
+    
+    // Check if mount path ends with a single letter (drive designation)
+    if (preg_match('/\/([A-Z])$/', $mount_path, $matches)) {
+        $drive_letter = $matches[1];
+        return $agent_name . ' - ' . $drive_letter . ':';
+    }
+    
+    // Default to just the agent name
+    return $agent_name;
+}
+
+$server_ip = trim(shell_exec('hostname -I | awk \'{print $1}\''));
+$mounted_snapshots = getMountedSnapshots();
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <?php
-        $server_ip = trim(shell_exec('hostname -I | awk \'{print $1}\''));
-    ?>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OpenRT Explorer</title>
-    <!-- Local Bootstrap 5 CSS -->
+    <title>OpenRT File Explorer</title>
     <link href="assets/bootstrap/bootstrap.min.css" rel="stylesheet">
-    <!-- D-Din Font -->
     <link href="assets/fonts/fonts.css" rel="stylesheet">
+    <link href="assets/fontawesome/css/all.min.css" rel="stylesheet">
     <style>
         body {
             font-family: 'D-DIN', sans-serif;
-            background-color: #212529;
-            color: #fff;
-        }
-        .logo {
-            max-height: 50px;
-            margin: 10px;
-        }
-        .metadata-table {
-            margin-top: 20px;
+            background-color: #191D27;
+            color: #E0E0E0;
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
         }
         .navbar {
-            background-color: #1a1d20;
-            color: white;
-            border-bottom: 1px solid #2c3238;
+            background-color: #12151B;
+            border-bottom: 2px solid #7BCBCD;
+            padding: 1rem;
         }
         .navbar-brand {
-            color: white !important;
+            color: #EDEDED !important;
+            font-size: 1.5rem;
+            font-weight: bold;
         }
-        .card {
-            background-color: #2c3238;
-            border-color: #373d44;
+        .explorer-container {
+            flex: 1;
+            display: flex;
+            height: calc(100vh - 80px);
         }
-        .card-header {
-            background-color: #373d44;
-            color: #fff;
-            border-bottom-color: #2c3238;
+        .sidebar {
+            width: 300px;
+            background-color: #1E232E;
+            border-right: 1px solid #354C4B;
+            padding: 1rem;
+            overflow-y: auto;
         }
-        /* Table styling to match index.php */
-        .table {
-            color: #fff !important;
-            border-color: #373d44;
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
         }
-        .table > thead > tr > th {
-            background-color: #1a1d20 !important;
-            color: #fff !important;
-            border-bottom-color: #373d44;
-            font-weight: 600;
+        .breadcrumb-bar {
+            background-color: #354C4B;
+            padding: 1rem;
+            border-bottom: 1px solid #354C4B;
         }
-        .table > tbody > tr:nth-of-type(odd) > * {
-            background-color: #343a40 !important;
-            color: #fff !important;
-            border-bottom-color: #373d44;
+        .breadcrumb {
+            background: none;
+            margin: 0;
+            padding: 0;
         }
-        .table > tbody > tr:nth-of-type(even) > * {
-            background-color: #2c3238 !important;
-            color: #fff !important;
-            border-bottom-color: #373d44;
+        .breadcrumb-item {
+            color: #7BCBCD;
         }
-        .table > tbody > tr > td {
-            border-color: #373d44;
+        .breadcrumb-item.active {
+            color: #EDEDED;
         }
-        .text-muted {
-            color: #adb5bd !important;
-        }
-        .back-button {
-            background-color: #0d6efd;
-            color: white;
+        .breadcrumb-item a {
+            color: #7BCBCD;
             text-decoration: none;
+        }
+        .breadcrumb-item a:hover {
+            color: #6CA872;
+        }
+        .file-list {
+            flex: 1;
+            overflow-y: auto;
+        }
+        .file-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .file-table th {
+            background-color: #354C4B;
+            color: #EDEDED;
+            padding: 0.75rem;
+            text-align: left;
+            border-bottom: 2px solid #354C4B;
+            font-weight: 600;
+            cursor: pointer;
+            user-select: none;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        .file-table th:hover {
+            background-color: #274C4C;
+        }
+        .file-table th .sort-indicator {
+            float: right;
+            margin-left: 0.5rem;
+            opacity: 0.5;
+        }
+        .file-table th.sorted .sort-indicator {
+            opacity: 1;
+        }
+        .file-table td {
+            padding: 0.75rem;
+            border-bottom: 1px solid #354C4B;
+            vertical-align: middle;
+        }
+        .file-table tr:hover td {
+            background-color: #354C4B;
+        }
+        .file-icon {
+            width: 40px;
+            text-align: center;
+            font-size: 1.2rem;
+        }
+        .file-icon.folder {
+            color: #C4AC62;
+        }
+        .file-icon.parent {
+            color: #7BCBCD;
+        }
+        .file-icon.file {
+            color: #7BCBCD;
+        }
+        .file-name {
+            font-weight: 500;
+            color: #EDEDED;
+            cursor: pointer;
+        }
+        .file-name:hover {
+            color: #7BCBCD;
+        }
+        .file-size {
+            text-align: right;
+            color: #7BCBCD;
+            font-size: 0.9rem;
+            width: 100px;
+        }
+        .file-modified {
+            color: #7BCBCD;
+            font-size: 0.9rem;
+            width: 150px;
+        }
+        .file-actions {
+            width: 120px;
+            text-align: right;
+        }
+        .btn-download {
+            background-color: #6CA872;
+            color: #E0E0E0;
+            border: none;
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            margin-left: 0.25rem;
+        }
+        .btn-download:hover {
+            background-color: #5A9560;
+        }
+        .btn-download-folder {
+            background-color: #C4AC62;
+            color: #E0E0E0;
+            border: none;
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            margin-left: 0.25rem;
+        }
+        .btn-download-folder:hover {
+            background-color: #B39B52;
+        }
+        .mount-item {
+            background-color: #12151B;
+            border: 1px solid #354C4B;
+            border-radius: 5px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .mount-item:hover {
+            border-color: #7BCBCD;
+            background-color: #1E232E;
+        }
+        .mount-title {
+            font-weight: bold;
+            color: #7BCBCD;
+            margin-bottom: 0.5rem;
+        }
+        .mount-details {
+            font-size: 0.85rem;
+            color: #7BCBCD;
+        }
+        .loading {
+            text-align: center;
+            padding: 3rem;
+            color: #7BCBCD;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: #354C4B;
+        }
+        .toolbar {
+            background-color: #1E232E;
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid #354C4B;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+        .btn-toolbar {
+            background-color: #274C4C;
+            color: #E0E0E0;
+            border: none;
             padding: 0.5rem 1rem;
-            border-radius: 0.375rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
             transition: background-color 0.2s;
         }
-        .back-button:hover {
-            background-color: #0b5ed7;
-            color: white;
+        .btn-toolbar:hover {
+            background-color: #6c757d;
         }
-        .loading-spinner {
-            width: 3rem;
-            height: 3rem;
+        .path-input {
+            flex: 1;
+            background-color: #12151B;
+            border: 1px solid #495057;
+            color: #EDEDED;
+            padding: 0.5rem;
+            border-radius: 4px;
         }
-        .agent-count {
-            font-size: 0.875rem;
-            color: #adb5bd;
-        }
-        code {
-            color: #ffffff !important;
-            background-color: #1a1d20;
-            padding: 0.2rem 0.4rem;
-            border-radius: 0.25rem;
-            font-size: 0.875em;
-            word-break: break-all;
+        .path-input:focus {
+            outline: none;
+            border-color: #7BCBCD;
         }
     </style>
 </head>
 <body>
     <nav class="navbar">
-        <div class="container-fluid">
-            <div class="d-flex align-items-center">
-                <a href="index.php" class="back-button me-3">
-                    <i class="fas fa-arrow-left"></i> Back
-                </a>
-                <button class="btn btn-light me-2" data-bs-toggle="modal" data-bs-target="#connectModal">
-                    <i class="fas fa-network-wired"></i> SMB/NFS/FTP
-                </button>
-                <span class="navbar-brand"></span>
-            </div>
-            <span class="navbar-text fw-bold" style="position: absolute; left: 50%; transform: translateX(-50%); color: white;">
-                http://<?php echo $server_ip; ?>
-                <br>
-                <small class="text-muted">explorer: <?php echo trim(file_get_contents('/usr/local/openRT/status/explorer')); ?></small>
+        <div class="container-fluid d-flex align-items-center">
+            <span class="navbar-brand">
+                <i class="fas fa-folder-open"></i> OpenRT File Explorer
             </span>
-            <img src="assets/images/openRT.png" alt="OpenRT Logo" class="logo">
+            <a href="index.php" class="btn btn-secondary ms-auto">
+                <i class="fas fa-arrow-left"></i> Back to Main
+            </a>
         </div>
     </nav>
-
-    <!-- Connection Modal -->
-    <div class="modal fade" id="connectModal" tabindex="-1" aria-labelledby="connectModalLabel" aria-hidden="true">
-        <div class="modal-dialog modal-fullscreen">
-            <div class="modal-content bg-dark text-light">
-                <div class="modal-header border-secondary">
-                    <h5 class="modal-title" id="connectModalLabel">Connection Details</h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    <div class="container-fluid">
-                        <div class="row justify-content-center">
-                            <div class="col-md-4">
-                                <div class="card bg-secondary mb-3">
-                                    <div class="card-header">
-                                        <h6 class="mb-0">SMB Connection</h6>
-                                    </div>
-                                    <div class="card-body">
-                                        <p><strong>Path:</strong><br><code>\\<?php echo $server_ip; ?>\</code></p>
-                                        <p><strong>Username:</strong><br><code>explorer</code></p>
-                                        <p><strong>Password:</strong><br><code><?php echo trim(file_get_contents('/usr/local/openRT/status/explorer')); ?></code></p>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="card bg-secondary mb-3">
-                                    <div class="card-header">
-                                        <h6 class="mb-0">NFS Connection</h6>
-                                    </div>
-                                    <div class="card-body">
-                                        <p><strong>Path:</strong><br><code><?php echo $server_ip; ?>:/</code></p>
-                                        <p><strong>Mount Command:</strong><br><code>mount -t nfs <?php echo $server_ip; ?>:/ /mnt/openRT</code></p>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="card bg-secondary mb-3">
-                                    <div class="card-header">
-                                        <h6 class="mb-0">FTP Connection</h6>
-                                    </div>
-                                    <div class="card-body">
-                                        <p><strong>Host:</strong><br><code>ftp://<?php echo $server_ip; ?></code></p>
-                                        <p><strong>Username:</strong><br><code>explorer</code></p>
-                                        <p><strong>Password:</strong><br><code><?php echo trim(file_get_contents('/usr/local/openRT/status/explorer')); ?></code></p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="row justify-content-center">
-                            <div class="col-md-12 text-center">
-                                <div class="mt-3">
-                                    <h6>Quick Connection Guide:</h6>
-                                    <ul class="list-unstyled">
-                                        <li class="mb-2"><strong>Windows:</strong> Use File Explorer → Map Network Drive (SMB) or enable NFS Client</li>
-                                        <li class="mb-2"><strong>Mac:</strong> Finder → Go → Connect to Server (⌘K) for SMB or mount NFS</li>
-                                        <li class="mb-2"><strong>Linux:</strong> Mount using SMB/CIFS, NFS, or use any FTP client</li>
-                                    </ul>
-                                </div>
-                            </div>
-                        </div>
+    
+    <div class="explorer-container">
+        <div class="sidebar">
+            <h5 class="text-light mb-3">
+                <i class="fas fa-hdd"></i> Mounted Snapshots
+            </h5>
+            <div id="mountedSnapshots">
+                <?php if (empty($mounted_snapshots)): ?>
+                    <div class="empty-state">
+                        <i class="fas fa-info-circle mb-2"></i>
+                        <p>No snapshots currently mounted</p>
+                        <small>Use the Recovery Wizard to mount snapshots</small>
                     </div>
-                </div>
+                <?php else: ?>
+                    <?php foreach ($mounted_snapshots as $mount): ?>
+                        <div class="mount-item" onclick="navigateTo('<?php echo htmlspecialchars($mount['final_mount'] ?? $mount['mount_path']); ?>')">
+                            <div class="mount-title">
+                                <i class="fas fa-desktop"></i> 
+                                <?php echo htmlspecialchars(formatMountTitle($mount)); ?>
+                            </div>
+                            <div class="mount-details">
+                                <?php echo htmlspecialchars($mount['snapshot_date'] ?? 'Unknown date'); ?><br>
+                                <small><?php echo htmlspecialchars($mount['final_mount'] ?? $mount['mount_path']); ?></small>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                <?php endif; ?>
             </div>
         </div>
-    </div>
-
-    <div class="container-fluid mt-4">
-        <div class="row">
-            <div class="col">
-                <div class="card">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        Agent Metadata
-                        <div class="d-flex align-items-center">
-                            <span class="agent-count me-3" id="agent-count"></span>
-                            <small class="text-muted me-3" id="last-updated"></small>
-                            <button class="btn btn-sm btn-outline-light me-2" onclick="unmountAll()">
-                                <img src="assets/images/spinner.svg" alt="Loading" class="spinner d-none" style="width: 1rem; height: 1rem;">
-                                <span class="button-text">Unmount All</span>
-                            </button>
-                            <button class="btn btn-sm btn-outline-light" onclick="updateMetadata()">
-                                <img src="assets/images/spinner.svg" alt="Loading" class="spinner d-none" style="width: 1rem; height: 1rem;">
-                                <span class="button-text">Refresh</span>
-                            </button>
-                        </div>
-                    </div>
-                    <div class="card-body">
-                        <div id="loading" class="text-center py-5">
-                            <img src="assets/images/spinner.svg" alt="Loading" class="loading-spinner">
-                            <p class="mt-3">Loading metadata...</p>
-                        </div>
-                        <div id="table-container" style="display: none;">
-                            <table class="table table-hover metadata-table">
-                                <thead>
-                                    <tr>
-                                        <th>Hostname</th>
-                                        <th>IP Address</th>
-                                        <th>Operating System</th>
-                                        <th>Storage</th>
-                                        <th>Snapshots</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="metadata-content">
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Local JavaScript dependencies -->
-    <script src="assets/bootstrap/bootstrap.bundle.min.js"></script>
-    <script>
-        const SERVER_IP = '<?php echo $server_ip; ?>';
         
-        function formatTimestamp(timestamp) {
-            if (!timestamp) return 'Never';
-            const date = new Date(timestamp * 1000);
-            return date.toLocaleString();
+        <div class="main-content">
+            <div class="toolbar">
+                <button class="btn-toolbar" onclick="goBack()">
+                    <i class="fas fa-arrow-left"></i> Back
+                </button>
+                <button class="btn-toolbar" onclick="goUp()">
+                    <i class="fas fa-arrow-up"></i> Up
+                </button>
+                <input type="text" class="path-input" id="pathInput" placeholder="Enter path..." onkeypress="handlePathInput(event)">
+                <button class="btn-toolbar" onclick="refreshDirectory()">
+                    <i class="fas fa-sync-alt"></i> Refresh
+                </button>
+            </div>
+            
+            <div class="breadcrumb-bar">
+                <nav aria-label="breadcrumb">
+                    <ol class="breadcrumb" id="breadcrumb">
+                    </ol>
+                </nav>
+            </div>
+            
+            <div class="file-list" id="fileList">
+                <table class="file-table" id="fileTable" style="display: none;">
+                    <thead>
+                        <tr>
+                            <th onclick="sortBy('name')" id="th-name">
+                                Name
+                                <span class="sort-indicator">
+                                    <i class="fas fa-sort"></i>
+                                </span>
+                            </th>
+                            <th onclick="sortBy('size')" id="th-size">
+                                Size
+                                <span class="sort-indicator">
+                                    <i class="fas fa-sort"></i>
+                                </span>
+                            </th>
+                            <th onclick="sortBy('modified')" id="th-modified">
+                                Modified
+                                <span class="sort-indicator">
+                                    <i class="fas fa-sort"></i>
+                                </span>
+                            </th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="fileTableBody">
+                    </tbody>
+                </table>
+                <div class="loading" id="loadingIndicator">
+                    <i class="fas fa-spinner fa-spin fa-2x"></i>
+                    <p>Loading directory contents...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let currentPath = '<?php echo addslashes($current_path); ?>';
+        let history = [];
+        let currentSort = 'name';
+        let currentOrder = 'asc';
+        
+        function navigateTo(path) {
+            if (currentPath !== path) {
+                history.push(currentPath);
+            }
+            currentPath = path;
+            document.getElementById('pathInput').value = path;
+            loadDirectory();
         }
-
-        async function unmountAll() {
-            const button = document.querySelector('button[onclick="unmountAll()"]');
-            const spinner = button.querySelector('.spinner');
-            const buttonText = button.querySelector('.button-text');
-
-            // Show loading state
-            spinner.classList.remove('d-none');
-            buttonText.classList.add('d-none');
-            button.disabled = true;
-
-            try {
-                const response = await fetch('unmount_all.php');
-                const result = await response.json();
-                
-                // Check both possible success indicators
-                const isSuccess = result.success || result.status === "success";
-                
-                if (isSuccess) {
-                    // Show success state briefly
-                    buttonText.textContent = 'Unmounted!';
-                    buttonText.classList.remove('d-none');
-                    button.classList.remove('btn-outline-light');
-                    button.classList.add('btn-success');
-                    
-                    // Show number of items cleaned if available
-                    if (result.cleaned && result.cleaned.length > 0) {
-                        console.log('Cleaned items:', result.cleaned);
-                    }
-                    
-                    // Refresh the metadata to update the UI
-                    setTimeout(() => {
-                        updateMetadata();
-                    }, 1000);
-                    
-                    // Reset button after 2 seconds
-                    setTimeout(() => {
-                        buttonText.textContent = 'Unmount All';
-                        button.classList.remove('btn-success');
-                        button.classList.add('btn-outline-light');
-                        button.disabled = false;
-                    }, 2000);
+        
+        function goBack() {
+            if (history.length > 0) {
+                currentPath = history.pop();
+                document.getElementById('pathInput').value = currentPath;
+                loadDirectory();
+            }
+        }
+        
+        function goUp() {
+            const parentPath = currentPath.split('/').slice(0, -1).join('/') || '/';
+            if (parentPath !== currentPath) {
+                navigateTo(parentPath);
+            }
+        }
+        
+        function handlePathInput(event) {
+            if (event.key === 'Enter') {
+                const newPath = event.target.value;
+                if (newPath !== currentPath) {
+                    navigateTo(newPath);
+                }
+            }
+        }
+        
+        function refreshDirectory() {
+            loadDirectory();
+        }
+        
+        function sortBy(column) {
+            if (currentSort === column) {
+                currentOrder = currentOrder === 'asc' ? 'desc' : 'asc';
+            } else {
+                currentSort = column;
+                currentOrder = 'asc';
+            }
+            loadDirectory();
+        }
+        
+        function updateSortIndicators() {
+            // Reset all indicators
+            document.querySelectorAll('.file-table th').forEach(th => {
+                th.classList.remove('sorted');
+                const icon = th.querySelector('.sort-indicator i');
+                if (icon) {
+                    icon.className = 'fas fa-sort';
+                }
+            });
+            
+            // Update current sort indicator
+            const currentTh = document.getElementById(`th-${currentSort}`);
+            if (currentTh) {
+                currentTh.classList.add('sorted');
+                const icon = currentTh.querySelector('.sort-indicator i');
+                if (icon) {
+                    icon.className = currentOrder === 'asc' ? 'fas fa-sort-up' : 'fas fa-sort-down';
+                }
+            }
+        }
+        
+        function updateBreadcrumb() {
+            const breadcrumb = document.getElementById('breadcrumb');
+            const parts = currentPath.split('/').filter(part => part !== '');
+            
+            let html = '<li class="breadcrumb-item"><a href="#" onclick="navigateTo(\'/\')">/</a></li>';
+            let path = '';
+            
+            parts.forEach((part, index) => {
+                path += '/' + part;
+                if (index === parts.length - 1) {
+                    html += `<li class="breadcrumb-item active">${part}</li>`;
                 } else {
-                    // Show error state
-                    buttonText.textContent = 'Failed';
-                    buttonText.classList.remove('d-none');
-                    button.classList.remove('btn-outline-light');
-                    button.classList.add('btn-danger');
-                    console.error('Unmount failed:', result.error || result.message || 'Unknown error');
-                    
-                    // Reset button after 2 seconds
-                    setTimeout(() => {
-                        buttonText.textContent = 'Unmount All';
-                        button.classList.remove('btn-danger');
-                        button.classList.add('btn-outline-light');
-                        button.disabled = false;
-                    }, 2000);
+                    html += `<li class="breadcrumb-item"><a href="#" onclick="navigateTo('${path}')">${part}</a></li>`;
                 }
-            } catch (error) {
-                // Show error state
-                buttonText.textContent = 'Error';
-                buttonText.classList.remove('d-none');
-                button.classList.remove('btn-outline-light');
-                button.classList.add('btn-danger');
-                console.error('Unmount error:', error);
-                
-                // Reset button after 2 seconds
-                setTimeout(() => {
-                    buttonText.textContent = 'Unmount All';
-                    button.classList.remove('btn-danger');
-                    button.classList.add('btn-outline-light');
-                    button.disabled = false;
-                }, 2000);
-            } finally {
-                spinner.classList.add('d-none');
-            }
+            });
+            
+            breadcrumb.innerHTML = html;
         }
-
-        // Add mount functionality
-        async function mountAgent(agentId) {
-            const button = document.querySelector(`button[data-agent-id="${agentId}"]`);
-            const spinner = button.querySelector('.spinner');
-            const buttonText = button.querySelector('.button-text');
-
-            // Show loading state
-            spinner.classList.remove('d-none');
-            buttonText.classList.add('d-none');
-            button.disabled = true;
-
+        
+        async function loadDirectory() {
+            const fileTable = document.getElementById('fileTable');
+            const loadingIndicator = document.getElementById('loadingIndicator');
+            const fileTableBody = document.getElementById('fileTableBody');
+            
+            // Show loading, hide table
+            fileTable.style.display = 'none';
+            loadingIndicator.style.display = 'block';
+            
+            updateBreadcrumb();
+            
             try {
-                const formData = new FormData();
-                formData.append('agent_id', agentId);
-
-                const response = await fetch('mount_agent.php', {
-                    method: 'POST',
-                    body: formData
-                });
-                const result = await response.json();
+                const url = `explore.php?action=get_contents&path=${encodeURIComponent(currentPath)}&sort=${currentSort}&order=${currentOrder}`;
+                const response = await fetch(url);
+                const data = await response.json();
                 
-                if (result.success || (result.status === "success" && result.mounts && result.mounts.length > 0)) {
-                    // Show success state briefly
-                    buttonText.textContent = 'Mounted!';
-                    buttonText.classList.remove('d-none');
-                    button.classList.remove('btn-primary');
-                    button.classList.add('btn-success');
-                    
-                    // After 1 second, replace with Explore button
-                    setTimeout(() => {
-                        // Create new explore button
-                        const td = button.parentElement;
-                        const exploreButton = document.createElement('a');
-                        exploreButton.href = `http://${SERVER_IP}/files/${agentId}/`;
-                        exploreButton.className = 'btn btn-sm btn-info';
-                        exploreButton.innerHTML = `
-                            <img src="assets/images/spinner.svg" alt="Loading" class="spinner d-none" style="width: 1rem; height: 1rem;">
-                            <span class="button-text">Explore Files</span>
-                        `;
-                        
-                        // Replace mount button with explore button
-                        td.replaceChild(exploreButton, button);
-                    }, 1000);
-                } else {
-                    // Show error state
-                    buttonText.textContent = 'Failed';
-                    buttonText.classList.remove('d-none');
-                    button.classList.remove('btn-primary');
-                    button.classList.add('btn-danger');
-                    console.error('Mount failed:', result.error || result.message || 'Unknown error');
-                    
-                    // Reset button after 2 seconds
-                    setTimeout(() => {
-                        buttonText.textContent = 'Mount All';
-                        button.classList.remove('btn-danger');
-                        button.classList.add('btn-primary');
-                        button.disabled = false;
-                    }, 2000);
-                }
-            } catch (error) {
-                // Show error state
-                buttonText.textContent = 'Error';
-                buttonText.classList.remove('d-none');
-                button.classList.remove('btn-primary');
-                button.classList.add('btn-danger');
-                console.error('Mount error:', error);
-                
-                // Reset button after 2 seconds
-                setTimeout(() => {
-                    buttonText.textContent = 'Mount All';
-                    button.classList.remove('btn-danger');
-                    button.classList.add('btn-primary');
-                    button.disabled = false;
-                }, 2000);
-            } finally {
-                spinner.classList.add('d-none');
-            }
-        }
-
-        // Function to check if an agent is mounted
-        async function checkMountStatus(agentId) {
-            try {
-                console.log(`Checking mount status for agent: ${agentId}`);
-                const response = await fetch(`check_mount.php?agent_id=${encodeURIComponent(agentId)}`);
-                
-                if (!response.ok) {
-                    console.error(`HTTP error checking mount status: ${response.status} ${response.statusText}`);
-                    return false;
-                }
-                
-                const result = await response.json();
-                console.log(`Mount status response for ${agentId}:`, result);
-                
-                // If the check was successful, return the mounted status
-                if (result.success) {
-                    return result.mounted;
-                }
-                
-                // If there was an error, log it and assume not mounted
-                console.error('Error in mount status response:', result.error || result.message || 'Unknown error');
-                return false;
-            } catch (error) {
-                console.error(`Error checking mount status for ${agentId}:`, error);
-                return false;
-            }
-        }
-
-        // Update the metadata function to check mount status
-        function updateMetadata() {
-            const refreshButton = document.querySelector('.btn-outline-light');
-            const spinner = refreshButton.querySelector('.spinner');
-            const buttonText = refreshButton.querySelector('.button-text');
-
-            // Show loading state
-            document.getElementById('loading').style.display = 'block';
-            document.getElementById('table-container').style.display = 'none';
-            spinner.classList.remove('d-none');
-            buttonText.classList.add('d-none');
-            refreshButton.disabled = true;
-
-            fetch('get_metadata.php')
-                .then(response => response.json())
-                .then(async data => {
-                    const metadataContent = document.getElementById('metadata-content');
-                    const lastUpdated = document.getElementById('last-updated');
-                    const agentCount = document.getElementById('agent-count');
-                    
-                    // Update timestamp and agent count
-                    lastUpdated.textContent = `Last updated: ${formatTimestamp(data.timestamp)}`;
-                    agentCount.textContent = `${data.agent_count} Agent${data.agent_count !== 1 ? 's' : ''}`;
-                    
-                    // Clear existing content
-                    metadataContent.innerHTML = '';
-                    
-                    // Convert agents object to array and sort by hostname
-                    const agents = Object.entries(data.agents)
-                        .filter(([id, info]) => {
-                            // Convert snapshot_count to number and check if greater than 0
-                            const snapshotCount = parseInt(info.snapshot_count || 0);
-                            return snapshotCount > 0;
-                        })
-                        .sort(([, a], [, b]) => {
-                            const hostnameA = (a.hostname || '').toLowerCase();
-                            const hostnameB = (b.hostname || '').toLowerCase();
-                            return hostnameA.localeCompare(hostnameB);
-                        });
-                    
-                    // Update agent count to reflect only visible agents
-                    agentCount.textContent = `${agents.length} Agent${agents.length !== 1 ? 's' : ''}`;
-                    
-                    // Add each agent to the table
-                    for (const [agentId, info] of agents) {
-                        const row = document.createElement('tr');
-                        
-                        // Format storage info with better readability
-                        const storageInfo = [];
-                        const volumes = info.Volumes || info.volumes;
-                        if (volumes) {
-                            Object.entries(volumes).forEach(([mount, vol]) => {
-                                // Skip Recovery volumes
-                                if (mount.toLowerCase() === 'recovery' || mount.toLowerCase().includes('recovery')) {
-                                    return;
-                                }
-                                
-                                const totalGB = Math.round(parseInt(vol.capacity) / (1024 * 1024 * 1024));
-                                const usedGB = Math.round(parseInt(vol.used) / (1024 * 1024 * 1024));
-                                const usedPercent = Math.round((usedGB / totalGB) * 100);
-                                const usageClass = usedPercent > 90 ? 'text-danger' : usedPercent > 70 ? 'text-warning' : 'text-success';
-                                storageInfo.push(`
-                                    <span class="${usageClass}" 
-                                          data-bs-toggle="tooltip" 
-                                          data-bs-placement="top" 
-                                          title="Used: ${usedGB}GB / ${totalGB}GB (${usedPercent}%)"
-                                    >${mount}</span>
-                                `);
-                            });
-                        }
-
-                        // Check if agent is mounted
-                        let isMounted = false;
-                        let actionButton = '';
-                        
-                        try {
-                            isMounted = await checkMountStatus(agentId);
-                            console.log(`Agent ${agentId} mount status:`, isMounted);
-                            
-                            actionButton = isMounted ? 
-                                `<a href="http://${SERVER_IP}/files/${agentId}/" class="btn btn-sm btn-info">
-                                    <img src="assets/images/spinner.svg" alt="Loading" class="spinner d-none" style="width: 1rem; height: 1rem;">
-                                    <span class="button-text">Explore Files</span>
-                                </a>` :
-                                `<button class="btn btn-sm btn-primary mount-button" 
-                                        onclick="mountAgent('${agentId}')"
-                                        data-agent-id="${agentId}">
-                                    <img src="assets/images/spinner.svg" alt="Loading" class="spinner d-none" style="width: 1rem; height: 1rem;">
-                                    <span class="button-text">Mount All</span>
-                                </button>`;
-                        } catch (error) {
-                            console.error(`Error creating action button for agent ${agentId}:`, error);
-                            // Fallback to mount button if there's an error
-                            actionButton = `<button class="btn btn-sm btn-primary mount-button" 
-                                            onclick="mountAgent('${agentId}')"
-                                            data-agent-id="${agentId}">
-                                <img src="assets/images/spinner.svg" alt="Loading" class="spinner d-none" style="width: 1rem; height: 1rem;">
-                                <span class="button-text">Mount All</span>
-                            </button>`;
-                        }
-
-                        row.innerHTML = `
-                            <td>${info.hostname || 'Unknown'}</td>
-                            <td>${info.fqdn || info.name || 'Unknown'}</td>
-                            <td>${(info.os || '').split(/\s+\d/).shift() || 'Unknown'}</td>
-                            <td>${storageInfo.join(', ') || 'No storage information'}</td>
-                            <td>${info.snapshot_count || 0}</td>
-                            <td>${actionButton}</td>
-                        `;
-                        metadataContent.appendChild(row);
-                    }
-
-                    // Initialize tooltips
-                    const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
-                    tooltipTriggerList.map(function (tooltipTriggerEl) {
-                        return new bootstrap.Tooltip(tooltipTriggerEl);
-                    });
-
-                    // Hide loading spinner and show table
-                    document.getElementById('loading').style.display = 'none';
-                    document.getElementById('table-container').style.display = 'block';
-                })
-                .catch(error => {
-                    console.error('Error fetching metadata:', error);
-                    document.getElementById('loading').innerHTML = `
-                        <p class="text-danger">Error loading metadata. Please try again later.</p>
+                if (data.error) {
+                    loadingIndicator.innerHTML = `
+                        <div class="empty-state">
+                            <i class="fas fa-exclamation-triangle fa-2x mb-3"></i>
+                            <p>Error: ${data.error}</p>
+                        </div>
                     `;
-                })
-                .finally(() => {
-                    // Reset refresh button state
-                    spinner.classList.add('d-none');
-                    buttonText.classList.remove('d-none');
-                    refreshButton.disabled = false;
-                });
+                    return;
+                }
+                
+                // Update sort state
+                currentSort = data.sort_by || 'name';
+                currentOrder = data.sort_order || 'asc';
+                updateSortIndicators();
+                
+                let html = '';
+                
+                // Add parent directory link if not at root
+                if (currentPath !== '/' && currentPath !== '/rtMount') {
+                    html += `
+                        <tr onclick="navigateTo('${data.parent_path}')" style="cursor: pointer;">
+                            <td>
+                                <div style="display: flex; align-items: center;">
+                                    <div class="file-icon parent">
+                                        <i class="fas fa-arrow-up"></i>
+                                    </div>
+                                    <span class="file-name">..</span>
+                                </div>
+                            </td>
+                            <td class="file-size">-</td>
+                            <td class="file-modified">-</td>
+                            <td class="file-actions">-</td>
+                        </tr>
+                    `;
+                }
+                
+                if (data.items.length === 0 && currentPath === '/rtMount') {
+                    loadingIndicator.innerHTML = `
+                        <div class="empty-state">
+                            <i class="fas fa-folder-open fa-2x mb-3"></i>
+                            <p>No mounted snapshots found</p>
+                            <small>Use the Recovery Wizard to mount snapshots first</small>
+                        </div>
+                    `;
+                    return;
+                } else if (data.items.length === 0) {
+                    html += `
+                        <tr>
+                            <td colspan="4" style="text-align: center; padding: 3rem; color: #6c757d;">
+                                <i class="fas fa-folder-open fa-2x mb-3"></i><br>
+                                This directory is empty
+                            </td>
+                        </tr>
+                    `;
+                } else {
+                    data.items.forEach(item => {
+                        const iconClass = item.is_dir ? 'folder' : 'file';
+                        const nameClickAction = item.is_dir ? `navigateTo('${item.path}')` : `downloadFile('${item.path}')`;
+                        
+                        let actionsHtml = '';
+                        if (item.is_dir) {
+                            actionsHtml = `
+                                <button class="btn-download-folder" onclick="event.stopPropagation(); downloadFolder('${item.path}')" title="Download as ZIP">
+                                    <i class="fas fa-download"></i> ZIP
+                                </button>
+                            `;
+                        } else {
+                            actionsHtml = `
+                                <button class="btn-download" onclick="event.stopPropagation(); downloadFile('${item.path}')" title="Download file">
+                                    <i class="fas fa-download"></i>
+                                </button>
+                            `;
+                        }
+                        
+                        html += `
+                            <tr>
+                                <td>
+                                    <div style="display: flex; align-items: center;">
+                                        <div class="file-icon ${iconClass}">
+                                            <i class="${item.icon}"></i>
+                                        </div>
+                                        <span class="file-name" onclick="${nameClickAction}">${item.name}</span>
+                                    </div>
+                                </td>
+                                <td class="file-size">${item.size}</td>
+                                <td class="file-modified">${item.modified}</td>
+                                <td class="file-actions">${actionsHtml}</td>
+                            </tr>
+                        `;
+                    });
+                }
+                
+                fileTableBody.innerHTML = html;
+                
+                // Show table, hide loading
+                loadingIndicator.style.display = 'none';
+                fileTable.style.display = 'table';
+                
+            } catch (error) {
+                loadingIndicator.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-times-circle fa-2x mb-3"></i>
+                        <p>Failed to load directory</p>
+                        <small>${error.message}</small>
+                    </div>
+                `;
+            }
         }
-
-        // Load metadata once on page load
-        updateMetadata();
+        
+        function downloadFile(filePath) {
+            // Create a temporary form to download the file
+            const form = document.createElement('form');
+            form.method = 'GET';
+            form.action = 'download.php';
+            
+            const pathInput = document.createElement('input');
+            pathInput.type = 'hidden';
+            pathInput.name = 'file';
+            pathInput.value = filePath;
+            
+            form.appendChild(pathInput);
+            document.body.appendChild(form);
+            form.submit();
+            document.body.removeChild(form);
+        }
+        
+        function downloadFolder(folderPath) {
+            const folderName = folderPath.split('/').pop();
+            
+            if (!confirm(`Download folder "${folderName}" as ZIP file?\n\nThis will create a compressed archive of all files and subfolders.\nLarge folders may take some time to download.`)) {
+                return;
+            }
+            
+            // Show loading indicator for the specific button
+            const button = event.target.closest('.btn-download-folder');
+            const originalHtml = button.innerHTML;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Preparing...';
+            button.disabled = true;
+            
+            // Create download link and trigger download
+            const link = document.createElement('a');
+            link.href = `explore.php?action=download_folder&path=${encodeURIComponent(folderPath)}`;
+            link.download = folderName + '.zip';
+            link.style.display = 'none';
+            
+            // Add to DOM and click
+            document.body.appendChild(link);
+            link.click();
+            
+            // Clean up
+            setTimeout(() => {
+                document.body.removeChild(link);
+                button.innerHTML = '<i class="fas fa-check"></i> Started';
+                button.style.backgroundColor = '#28a745';
+                
+                // Reset button after a few seconds
+                setTimeout(() => {
+                    button.innerHTML = originalHtml;
+                    button.disabled = false;
+                    button.style.backgroundColor = '';
+                }, 3000);
+            }, 500);
+        }
+        
+        // Load initial directory
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('pathInput').value = currentPath;
+            loadDirectory();
+        });
     </script>
 </body>
-</html> 
+</html>
