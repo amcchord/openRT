@@ -2,8 +2,8 @@
 
 **OpenRT** is a powerful, enterprise-grade open-source system for mounting and managing backup volumes from various vendors. With a completely redesigned architecture and modern web interface, it provides comprehensive tools for disaster recovery, data exploration, and backup management.
 
-![OpenRT Dashboard](screenshots/dashboard-placeholder.png)
-*Screenshot placeholder: Main dashboard showing system status and quick actions*
+<img width="1359" height="1328" alt="Index" src="https://github.com/user-attachments/assets/b3d31b7d-e753-408a-b3ca-97826a67cf73" />
+
 
 ## 🎉 What's New in v2.1 (Major Update from v1.3)
 
@@ -131,8 +131,8 @@ After installation completes:
 
 Access the modern dashboard at `http://<server-ip>`:
 
-![Web Dashboard Overview](screenshots/web-dashboard-placeholder.png)
-*Screenshot placeholder: Modern web dashboard with dark theme*
+<img width="1359" height="1328" alt="Index" src="https://github.com/user-attachments/assets/4427f01a-1c3d-4ccb-bea4-d5a34a2e991b" />
+
 
 #### Key Features:
 
@@ -141,16 +141,14 @@ Access the modern dashboard at `http://<server-ip>`:
    - Manual device path specification
    - Real-time import progress
    
-   ![Import Process](screenshots/import-process-placeholder.png)
-   *Screenshot placeholder: Import pool interface*
 
 2. **🧙‍♂️ Recovery Wizard**
    - Step 1: Select backup agent
    - Step 2: Choose snapshot (latest or specific date)
    - Step 3: Mount and access files
    
-   ![Recovery Wizard](screenshots/recovery-wizard-placeholder.png)
-   *Screenshot placeholder: 3-step recovery wizard*
+<img width="1359" height="1328" alt="Wizard" src="https://github.com/user-attachments/assets/d21beb8d-3180-4f08-aa56-d9bec26575c7" />
+
 
 3. **📁 File Explorer**
    - Browse mounted snapshots
@@ -158,8 +156,8 @@ Access the modern dashboard at `http://<server-ip>`:
    - Download files directly
    - Navigate folder structure
    
-   ![File Explorer](screenshots/file-explorer-placeholder.png)
-   *Screenshot placeholder: File explorer browsing mounted snapshots*
+<img width="1359" height="1328" alt="Explore" src="https://github.com/user-attachments/assets/3868cd37-2833-47c6-920c-c39ee7ec498d" />
+
 
 4. **🖥️ Web Terminal**
    - Secure shell access
@@ -167,8 +165,6 @@ Access the modern dashboard at `http://<server-ip>`:
    - Execute openRTTUI.pl operations
    - Real-time command output
    
-   ![Web Terminal](screenshots/web-terminal-placeholder.png)
-   *Screenshot placeholder: Web-based terminal interface*
 
 5. **📊 Log Viewer**
    - View operation logs
@@ -176,8 +172,6 @@ Access the modern dashboard at `http://<server-ip>`:
    - Real-time log updates
    - Export log data
    
-   ![Log Viewer](screenshots/log-viewer-placeholder.png)
-   *Screenshot placeholder: Log viewer interface*
 
 ### Text User Interface (TUI)
 
@@ -186,9 +180,8 @@ Launch the interactive TUI:
 ```bash
 sudo /usr/local/openRT/openRTApp/openRTTUI.pl
 ```
+<img width="793" height="536" alt="Screenshot 2025-09-23 at 10 11 13 AM" src="https://github.com/user-attachments/assets/9fffbe08-ed70-4cd3-9b5c-9e31aafe9a51" />
 
-![TUI Main Menu](screenshots/tui-main-menu-placeholder.png)
-*Screenshot placeholder: TUI main menu interface*
 
 Navigate using number keys:
 - **1** - View System Status
