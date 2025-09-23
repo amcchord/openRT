@@ -23,6 +23,23 @@ function runOpenRTCommand($command, $args = []) {
     ];
 }
 
+function getOpenRTVersion() {
+    $readmePath = '../openRTApp/README.md';
+    if (file_exists($readmePath)) {
+        $content = file_get_contents($readmePath);
+        if ($content !== false) {
+            // Get the last line that contains version info
+            $lines = explode("\n", $content);
+            foreach (array_reverse($lines) as $line) {
+                if (preg_match('/VER\s+(.+)/', trim($line), $matches)) {
+                    return trim($matches[1]);
+                }
+            }
+        }
+    }
+    return '1.0'; // Default fallback version
+}
+
 // Handle AJAX requests
 if (isset($_GET['action'])) {
     header('Content-Type: application/json');
@@ -116,7 +133,7 @@ if (isset($_GET['action'])) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OpenRT Control Panel - <?php echo $_SERVER['SERVER_ADDR']; ?></title>
+    <title>OpenRT Control Panel - <?php echo trim(shell_exec('hostname -I | awk \'{print $1}\'')); ?></title>
     <link href="assets/bootstrap/bootstrap.min.css" rel="stylesheet">
     <link href="assets/fonts/fonts.css" rel="stylesheet">
     <link href="assets/fontawesome/css/all.min.css" rel="stylesheet">
@@ -428,7 +445,7 @@ if (isset($_GET['action'])) {
     <nav class="navbar">
         <div class="container-fluid d-flex align-items-center">
             <span class="navbar-brand">
-                OpenRT - <?php echo $_SERVER['SERVER_ADDR']; ?>
+                OpenRT - <?php echo trim(shell_exec('hostname -I | awk \'{print $1}\'')); ?>
             </span>
             <img src="assets/images/openRT.png" alt="OpenRT Logo" class="logo">
         </div>
@@ -517,7 +534,7 @@ if (isset($_GET['action'])) {
     
     <div class="footer">
         <p>OpenRT Web Interface - All operations use openRTTUI.pl</p>
-        <small>System: <?php echo gethostname(); ?> | IP: <?php echo $_SERVER['SERVER_ADDR']; ?></small>
+        <small>System: <?php echo gethostname(); ?> | IP: <?php echo trim(shell_exec('hostname -I | awk \'{print $1}\'')); ?> | Version: <?php echo getOpenRTVersion(); ?></small>
     </div>
     
     <!-- Result Modal -->

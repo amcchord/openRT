@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Target version for updates
-TARGET_VERSION="1.3"
+TARGET_VERSION="2.1"
 
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then
