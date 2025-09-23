@@ -29,21 +29,6 @@
 - **JSON API**: Structured output for automation and integration
 - **Auto-updates**: GitHub-based automatic update system
 
-## ✨ Key Features
-
-### Core Functionality
-- **🎯 Smart Mounting**: Intelligent snapshot selection and mounting strategies
-- **📦 Multi-vendor Support**: Compatible with Datto, Veeam, and other backup formats
-- **🔄 ZFS Integration**: Advanced ZFS pool management with cloning capabilities
-- **💿 VMDK Generation**: Automatic VMDK descriptor creation for VMware compatibility
-- **🔐 Security First**: Role-based access control and secure operations
-
-### User Interfaces
-- **🖥️ Web Dashboard**: Modern, responsive web interface for all operations
-- **⌨️ Text UI (TUI)**: Interactive terminal interface for direct server access
-- **🤖 CLI Mode**: Non-interactive command-line interface for automation
-- **📱 Mobile Ready**: Responsive design works on tablets and phones
-
 ## System Requirements
 
 - Ubuntu Server 22.04 LTS
