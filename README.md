@@ -1,4 +1,4 @@
-# openRT v2.1
+# openRT v2.2
 
 **OpenRT** is a powerful, enterprise-grade open-source system for mounting and managing backup volumes from various vendors. With a completely redesigned architecture and modern web interface, it provides comprehensive tools for disaster recovery, data exploration, and backup management.
 
