@@ -330,24 +330,7 @@ We welcome contributions! Please:
 - Command-line tools
 - Basic automation support
 
-## 🚧 Roadmap
 
-### Planned Features for v2.2
-- [ ] Multi-user role management
-- [ ] Scheduled backup verification
-- [ ] Email notifications for operations
-- [ ] Mobile app for remote management
-- [ ] Cloud backup integration
-- [ ] Advanced reporting and analytics
-- [ ] Backup integrity verification
-- [ ] Incremental mount support
-
-### Future Enhancements
-- Docker containerization
-- Kubernetes deployment support
-- REST API for third-party integration
-- Machine learning for predictive maintenance
-- Blockchain-based audit logging
 
 ## 📄 License
 
@@ -379,8 +362,3 @@ SOFTWARE.
   
 **[⬆ Back to Top](#openrt-v21)**
 
-Made with ❤️ by the OpenRT Team
-
-*Empowering disaster recovery and data restoration*
-
-</div>
