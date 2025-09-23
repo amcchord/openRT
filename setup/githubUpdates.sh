@@ -58,6 +58,10 @@ if [ "$1" = "remote" ]; then
             echo "Allowing www-data users to sudo without a password..."
             echo "www-data ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
+            #Run clean up clones openRTTUI.pl --non-interactive cleanup-clones
+            echo "Running clean up clones..."
+            sudo /usr/local/openRT/openRTApp/openRTTUI.pl --non-interactive cleanup-clones
+
         else
             echo "openRTApp is already at version $TARGET_VERSION"
         fi
@@ -97,7 +101,10 @@ if [ "$1" = "remote" ]; then
         #allow the www-data users to sudo without a password
         echo "Allowing www-data users to sudo without a password..."
         echo "www-data ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
-        
+
+        #Run clean up clones openRTTUI.pl --non-interactive cleanup-clones
+        echo "Running clean up clones..."
+        sudo /usr/local/openRT/openRTApp/openRTTUI.pl --non-interactive cleanup-clones
     fi
 
     exit 0

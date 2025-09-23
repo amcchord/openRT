@@ -842,83 +842,131 @@ sub cmd_cleanup_clones {
         my @clones = `zfs list -H -o name | grep 'mount_'`;
         chomp(@clones);
         
+        # Get list of non-mountpoint folders in /rtMount/
+        my @removed_folders = cleanup_rtmount_folders();
+        
+        my @clone_results = ();
         if (@clones) {
-            my @results = ();
             foreach my $clone (@clones) {
                 my $result = system("zfs destroy $clone 2>/dev/null");
-                push @results, {
+                push @clone_results, {
                     clone => $clone,
                     status => $result == 0 ? "destroyed" : "failed"
                 };
             }
-            
-            print encode_json({
-                status => "completed",
-                message => "Cleanup of orphaned ZFS clones completed",
-                clones_found => scalar(@clones),
-                results => \@results
-            }) . "\n";
-        } else {
-            print encode_json({
-                status => "completed", 
-                message => "No orphaned ZFS clones found",
-                clones_found => 0,
-                results => []
-            }) . "\n";
         }
+        
+        print encode_json({
+            status => "completed",
+            message => "Cleanup of orphaned ZFS clones and non-mountpoint folders completed",
+            clones_found => scalar(@clones),
+            clone_results => \@clone_results,
+            folders_removed => \@removed_folders,
+            folders_removed_count => scalar(@removed_folders)
+        }) . "\n";
         return;
     }
     
-    print_header("Cleanup Orphaned ZFS Clones");
+    print_header("Cleanup Orphaned ZFS Clones and Folders");
     
     # Get list of orphaned mount clones
     print "Scanning for orphaned ZFS mount clones...\n";
     my @clones = `zfs list -H -o name | grep 'mount_'`;
     chomp(@clones);
     
-    if (!@clones) {
-        print_status("No orphaned ZFS clones found", 'success');
-        print "\nThese are ZFS clones created by the mount process that typically\n";
+    # Get list of non-mountpoint folders in /rtMount/
+    print "Scanning for non-mountpoint folders in /rtMount/...\n";
+    my @folders_to_remove = get_non_mountpoint_folders();
+    
+    if (!@clones && !@folders_to_remove) {
+        print_status("No orphaned ZFS clones or non-mountpoint folders found", 'success');
+        print "\nZFS clones are created by the mount process and typically\n";
         print "get cleaned up automatically, but may persist after system reboots\n";
         print "or unexpected shutdowns.\n";
+        print "\nNon-mountpoint folders can accumulate in /rtMount/ when cleanup\n";
+        print "operations are interrupted or incomplete.\n";
         wait_for_key();
         return;
     }
     
-    print colored("Found " . scalar(@clones) . " orphaned ZFS clones:", 'yellow') . "\n\n";
-    foreach my $clone (@clones) {
-        print "  • $clone\n";
+    if (@clones) {
+        print colored("Found " . scalar(@clones) . " orphaned ZFS clones:", 'yellow') . "\n\n";
+        foreach my $clone (@clones) {
+            print "  • $clone\n";
+        }
+        print "\n";
     }
     
-    print "\n";
-    print colored("WARNING:", 'red') . " This will permanently destroy these ZFS clones.\n";
-    print "Make sure no active mounts are using these clones before proceeding.\n";
-    print "These clones are typically safe to remove if no snapshots are currently mounted.\n\n";
+    if (@folders_to_remove) {
+        print colored("Found " . scalar(@folders_to_remove) . " non-mountpoint folders:", 'yellow') . "\n\n";
+        foreach my $folder (@folders_to_remove) {
+            print "  • $folder\n";
+        }
+        print "\n";
+    }
     
-    my $confirm = get_user_input("Proceed with cleanup of " . scalar(@clones) . " clones? (y/N)", "n");
+    print colored("WARNING:", 'red') . " This will permanently destroy ZFS clones and remove folders.\n";
+    if (@clones) {
+        print "Make sure no active mounts are using these clones before proceeding.\n";
+        print "These clones are typically safe to remove if no snapshots are currently mounted.\n";
+    }
+    if (@folders_to_remove) {
+        print "Non-mountpoint folders will be removed if they are empty or contain only\n";
+        print "other empty directories. Active mountpoints will be preserved.\n";
+    }
+    print "\n";
+    
+    my $total_items = scalar(@clones) + scalar(@folders_to_remove);
+    my $confirm = get_user_input("Proceed with cleanup of $total_items items? (y/N)", "n");
     
     if ($confirm =~ /^[yY]/) {
-        print "\nCleaning up orphaned ZFS clones...\n";
-        my $success_count = 0;
-        my $failed_count = 0;
+        my $clone_success_count = 0;
+        my $clone_failed_count = 0;
         
-        foreach my $clone (@clones) {
-            print "Destroying: $clone ... ";
-            my $result = system("zfs destroy $clone 2>/dev/null");
-            if ($result == 0) {
-                print colored("✓ Success", 'green') . "\n";
-                $success_count++;
-            } else {
-                print colored("✗ Failed", 'red') . "\n";
-                $failed_count++;
+        # Clean up ZFS clones
+        if (@clones) {
+            print "\nCleaning up orphaned ZFS clones...\n";
+            foreach my $clone (@clones) {
+                print "Destroying: $clone ... ";
+                my $result = system("zfs destroy $clone 2>/dev/null");
+                if ($result == 0) {
+                    print colored("✓ Success", 'green') . "\n";
+                    $clone_success_count++;
+                } else {
+                    print colored("✗ Failed", 'red') . "\n";
+                    $clone_failed_count++;
+                }
             }
         }
         
+        # Clean up non-mountpoint folders
+        my @removed_folders = ();
+        if (@folders_to_remove) {
+            print "\nCleaning up non-mountpoint folders...\n";
+            @removed_folders = cleanup_rtmount_folders();
+        }
+        
         print "\n";
-        if ($failed_count == 0) {
-            print_status("All $success_count clones cleaned up successfully", 'success');
-        } else {
-            print_status("Cleanup completed: $success_count successful, $failed_count failed", 'warning');
+        
+        # Report results
+        my @status_messages = ();
+        if (@clones) {
+            if ($clone_failed_count == 0) {
+                push @status_messages, "All $clone_success_count clones cleaned up successfully";
+            } else {
+                push @status_messages, "ZFS cleanup: $clone_success_count successful, $clone_failed_count failed";
+            }
+        }
+        
+        if (@folders_to_remove) {
+            push @status_messages, scalar(@removed_folders) . " folders removed";
+        }
+        
+        if (@status_messages) {
+            print_status(join(", ", @status_messages), $clone_failed_count == 0 ? 'success' : 'warning');
+        }
+        
+        if ($clone_failed_count > 0) {
             print "\nNote: Failed clones may be in use or have dependencies.\n";
             print "Try running the regular cleanup command first, or check for active mounts.\n";
         }
@@ -927,6 +975,144 @@ sub cmd_cleanup_clones {
     }
     
     wait_for_key();
+}
+
+# Get list of currently active mountpoints in /rtMount/
+sub get_active_mountpoints {
+    my @mountpoints = ();
+    
+    # Get all mount entries for /rtMount/
+    my @mount_lines = `mount | grep '/rtMount/'`;
+    chomp(@mount_lines);
+    
+    foreach my $line (@mount_lines) {
+        # Extract mount point from mount output
+        # Format: device on /path/to/mount type filesystem (options)
+        if ($line =~ /\s+on\s+(\S+)\s+type\s+/) {
+            my $mount_path = $1;
+            push @mountpoints, $mount_path;
+        }
+    }
+    
+    return @mountpoints;
+}
+
+# Check if a path is currently a mountpoint
+sub is_mountpoint {
+    my ($path) = @_;
+    
+    # Use mountpoint command if available, otherwise check /proc/mounts
+    my $result = system("mountpoint -q '$path' 2>/dev/null");
+    if ($result == 0) {
+        return 1;
+    }
+    
+    # Fallback: check if path appears in mount output
+    my $mount_check = `mount | grep -F " $path "`;
+    return $mount_check ? 1 : 0;
+}
+
+# Get list of folders in /rtMount/ that are not mountpoints
+sub get_non_mountpoint_folders {
+    my @folders_to_remove = ();
+    my $rtmount_base = "/rtMount";
+    
+    return @folders_to_remove unless -d $rtmount_base;
+    
+    # Get all active mountpoints
+    my @active_mountpoints = get_active_mountpoints();
+    my %mountpoint_map = map { $_ => 1 } @active_mountpoints;
+    
+    # Recursively find directories that are not mountpoints
+    find_non_mountpoint_dirs($rtmount_base, \@folders_to_remove, \%mountpoint_map);
+    
+    return @folders_to_remove;
+}
+
+# Recursively find directories that are not mountpoints
+sub find_non_mountpoint_dirs {
+    my ($base_dir, $folders_ref, $mountpoint_map) = @_;
+    
+    return unless -d $base_dir;
+    
+    opendir(my $dh, $base_dir) or return;
+    my @entries = grep { $_ ne '.' && $_ ne '..' } readdir($dh);
+    closedir($dh);
+    
+    foreach my $entry (@entries) {
+        my $full_path = "$base_dir/$entry";
+        
+        # Skip files and symlinks
+        next unless -d $full_path;
+        
+        # Skip special directories
+        next if $entry eq 'README.txt';
+        
+        # Check if this directory is a mountpoint
+        if (!$mountpoint_map->{$full_path} && !is_mountpoint($full_path)) {
+            # Check if directory is empty or contains only empty subdirectories
+            if (is_safe_to_remove($full_path)) {
+                push @$folders_ref, $full_path;
+            }
+        }
+        
+        # Recurse into subdirectories
+        find_non_mountpoint_dirs($full_path, $folders_ref, $mountpoint_map);
+    }
+}
+
+# Check if a directory is safe to remove (empty or contains only empty subdirectories)
+sub is_safe_to_remove {
+    my ($dir) = @_;
+    
+    return 0 unless -d $dir;
+    
+    opendir(my $dh, $dir) or return 0;
+    my @entries = grep { $_ ne '.' && $_ ne '..' } readdir($dh);
+    closedir($dh);
+    
+    # Empty directory is safe to remove
+    return 1 if @entries == 0;
+    
+    # Check if all entries are empty directories
+    foreach my $entry (@entries) {
+        my $full_path = "$dir/$entry";
+        
+        # If it's a file or symlink, not safe to remove
+        return 0 unless -d $full_path;
+        
+        # If it's a directory that's not safe to remove, then parent is not safe
+        return 0 unless is_safe_to_remove($full_path);
+    }
+    
+    return 1;
+}
+
+# Actually remove the non-mountpoint folders
+sub cleanup_rtmount_folders {
+    my @removed_folders = ();
+    my @folders_to_remove = get_non_mountpoint_folders();
+    
+    # Sort by depth (deepest first) to remove children before parents
+    @folders_to_remove = sort { 
+        my $depth_a = ($a =~ tr/\///);
+        my $depth_b = ($b =~ tr/\///);
+        $depth_b <=> $depth_a;
+    } @folders_to_remove;
+    
+    foreach my $folder (@folders_to_remove) {
+        # Double-check that it's still safe to remove and not a mountpoint
+        if (-d $folder && !is_mountpoint($folder) && is_safe_to_remove($folder)) {
+            if (rmdir($folder)) {
+                push @removed_folders, $folder;
+                print "  Removed: $folder\n" unless $non_interactive;
+            } else {
+                print "  Failed to remove: $folder ($!)\n" unless $non_interactive;
+            }
+        }
+    }
+    
+    return @removed_folders;
 }
 
 sub min {
@@ -1024,12 +1210,19 @@ NON-INTERACTIVE COMMANDS:
             sudo ./openRTTUI.pl --non-interactive cleanup LabPC
 
     cleanup-clones
-        Clean up orphaned ZFS mount clones that persist after reboots.
+        Clean up orphaned ZFS mount clones and non-mountpoint folders.
         
-        These are ZFS clones created during the mount process that normally
-        get cleaned up automatically, but may persist after system reboots
-        or unexpected shutdowns. This command safely removes all clones
-        with 'mount_' in their name.
+        This command performs two cleanup operations:
+        1. Removes ZFS clones created during the mount process that normally
+           get cleaned up automatically, but may persist after system reboots
+           or unexpected shutdowns. Safely removes all clones with 'mount_' 
+           in their name.
+        2. Removes empty directories in /rtMount/ that are not active 
+           mountpoints. This helps clean up leftover folder structures
+           from incomplete cleanup operations.
+        
+        The command preserves all active mountpoints and only removes
+        directories that are empty or contain only other empty directories.
         
         Example:
             sudo ./openRTTUI.pl --non-interactive cleanup-clones
@@ -1114,7 +1307,7 @@ sub show_main_menu {
     print "  5) List Active Mounts\n";
     print "  6) Mount Snapshot\n";
     print "  7) Cleanup Mounts\n";
-    print "  8) Cleanup Orphaned Clones\n";
+    print "  8) Cleanup Orphaned Clones & Folders\n";
     print "  9) Exit\n\n";
     
     my $choice = get_user_input("Select option (1-9)", "1");
