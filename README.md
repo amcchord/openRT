@@ -2,6 +2,16 @@
 
 **OpenRT** is a powerful, enterprise-grade open-source system for mounting and managing backup volumes from various vendors. With a completely redesigned architecture and modern web interface, it provides comprehensive tools for disaster recovery, data exploration, and backup management.
 
+
+## Download Pre-built Image
+
+The easiest way to install openRT is to download the pre-built image from the releases page. These are bootable in VirtualBox and VMWare and Hyper-V.
+
+[Download for x86_64](https://www.slide.recipes/openRT/OpenRT-x86VM.zip)
+
+[Download for Arm64](https://www.slide.recipes/openRT/OpenRT-Arm64VM.zip)
+
+
 <img width="1359" height="1328" alt="Index" src="https://github.com/user-attachments/assets/b3d31b7d-e753-408a-b3ca-97826a67cf73" />
 
 
